@@ -38,3 +38,24 @@ jobs:
           sam deploy --stack-name lambda-cicd-stack \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
+
+      - name: Publish Lambda Version and Update Test Alias
+        run: |
+          # Lambdaの関数名を取得（SAMのスタック出力から取得する場合）
+          FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name lambda-cicd-stack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunction'].OutputValue" --output text)
+
+          # 新しいバージョンを発行
+          VERSION=$(aws lambda publish-version --function-name $FUNCTION_NAME --description "Automated version created by GitHub Actions" --query "Version" --output text)
+
+          echo "Published Lambda version: $VERSION"
+
+          # Testエイリアスが既に存在するか確認
+          if aws lambda get-alias --function-name $FUNCTION_NAME --name Test &> /dev/null; then
+            # エイリアスが存在する場合は更新
+            aws lambda update-alias --function-name $FUNCTION_NAME --name Test --function-version $VERSION
+            echo "Updated Test alias to version $VERSION"
+          else
+            # エイリアスが存在しない場合は作成
+            aws lambda create-alias --function-name $FUNCTION_NAME --name Test --function-version $VERSION
+            echo "Created Test alias pointing to version $VERSION"
+          fi
