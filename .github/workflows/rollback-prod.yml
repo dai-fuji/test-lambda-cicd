@@ -1,0 +1,68 @@
+name: Rollback Prod Alias to Previous Version
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  rollback-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::571705099822:role/GitHubActionsSAMDeployRole
+          aws-region: ap-northeast-1
+
+      - name: Rollback Prod Alias to Previous Version
+        run: |
+          # Lambda関数名を取得
+          FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name lambda-cicd-stack --query "Stacks[0].Outputs[?OutputKey=='HelloWorldFunction'].OutputValue" --output text)
+
+          # 関数名が取得できたか確認
+          if [ -z "$FUNCTION_NAME" ] || [ "$FUNCTION_NAME" = "None" ]; then
+            echo "Lambda関数名が取得できませんでした。代替手段として関数名を使用します。"
+            FUNCTION_NAME="lambda-cicd-stack-HelloWorldFunction"
+          fi
+
+          # 関数ARNから関数名を抽出（ARNが返された場合）
+          if [[ "$FUNCTION_NAME" == arn:aws:lambda:* ]]; then
+            FUNCTION_NAME=$(echo "$FUNCTION_NAME" | awk -F: '{print $7}')
+          fi
+
+          echo "Lambda関数名: $FUNCTION_NAME"
+
+          # 現在のProdエイリアスのバージョンを取得
+          CURRENT_VERSION=$(aws lambda get-alias --function-name $FUNCTION_NAME --name Prod --query "FunctionVersion" --output text)
+          echo "現在のProdエイリアスのバージョン: $CURRENT_VERSION"
+
+          # 利用可能なバージョンを取得（古い順）
+          VERSIONS=$(aws lambda list-versions-by-function --function-name $FUNCTION_NAME --query "Versions[?Version!='$LATEST'].Version" --output text)
+
+          # バージョンを配列に変換
+          VERSIONS_ARRAY=($VERSIONS)
+
+          # 現在のバージョンのインデックスを見つける
+          CURRENT_INDEX=-1
+          for i in "${!VERSIONS_ARRAY[@]}"; do
+            if [ "${VERSIONS_ARRAY[$i]}" = "$CURRENT_VERSION" ]; then
+              CURRENT_INDEX=$i
+              break
+            fi
+          done
+
+          # ひとつ前のバージョンを特定
+          if [ $CURRENT_INDEX -gt 0 ]; then
+            PREVIOUS_VERSION=${VERSIONS_ARRAY[$CURRENT_INDEX-1]}
+            echo "ロールバック先のバージョン: $PREVIOUS_VERSION"
+            
+            # Prodエイリアスを前のバージョンに更新
+            aws lambda update-alias --function-name $FUNCTION_NAME --name Prod --function-version $PREVIOUS_VERSION
+            echo "Prodエイリアスをバージョン $PREVIOUS_VERSION にロールバックしました"
+          else
+            echo "これ以上古いバージョンが存在しないか、現在のバージョンが見つかりませんでした"
+            exit 1
+          fi
