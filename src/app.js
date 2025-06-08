@@ -6,7 +6,7 @@ exports.lambdaHandler = async (event, context) => {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "こんにちは、世界！",
+        message: "こんにちは、フジモトさん！",
         timestamp: new Date().toISOString(),
       }),
       headers: {
