@@ -42,7 +42,24 @@ jobs:
       - name: Publish Lambda Version and Update Test Alias
         run: |
           # Lambdaの関数名を取得（SAMのスタック出力から取得する場合）
-          FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name lambda-cicd-stack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunction'].OutputValue" --output text)
+          FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name lambda-cicd-stack --query "Stacks[0].Outputs[?OutputKey=='HelloWorldFunction'].OutputValue" --output text)
+
+          # 関数名が取得できたか確認
+          if [ -z "$FUNCTION_NAME" ] || [ "$FUNCTION_NAME" = "None" ]; then
+            echo "Lambda関数名が取得できませんでした。SAMテンプレートでOutputsセクションにHelloWorldFunctionという名前で関数ARNを出力しています。"
+            
+            # 代替手段：SAMテンプレートから直接関数名を特定
+            FUNCTION_NAME="lambda-cicd-stack-HelloWorldFunction"
+            echo "代替手段として関数名を使用します: $FUNCTION_NAME"
+          fi
+
+          # 関数ARNから関数名を抽出（ARNが返された場合）
+          if [[ "$FUNCTION_NAME" == arn:aws:lambda:* ]]; then
+            FUNCTION_NAME=$(echo "$FUNCTION_NAME" | awk -F: '{print $7}')
+            echo "ARNから関数名を抽出しました: $FUNCTION_NAME"
+          fi
+
+          echo "Lambda関数名: $FUNCTION_NAME"
 
           # 新しいバージョンを発行
           VERSION=$(aws lambda publish-version --function-name $FUNCTION_NAME --description "Automated version created by GitHub Actions" --query "Version" --output text)
