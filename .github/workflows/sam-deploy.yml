@@ -1,8 +1,9 @@
-name: Deploy SAM Application
+name: Deploy SAM Application for develop
 
 on:
   push:
     branches:
+      - develop
       - main
   workflow_dispatch:
 
@@ -13,6 +14,7 @@ permissions:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    environment: develop
     steps:
       - uses: actions/checkout@v3
 
@@ -27,7 +29,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          role-to-assume: arn:aws:iam::571705099822:role/GitHubActionsSAMDeployRole
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-northeast-1
 
       - name: SAM Build
@@ -40,7 +42,7 @@ jobs:
             --no-fail-on-empty-changeset
 
       - name: Publish Lambda Version and Update Test Alias
-        id: publish-version
+        # id: publish-version
         run: |
           # Lambdaの関数名を取得（SAMのスタック出力から取得する場合）
           FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name lambda-cicd-stack --query "Stacks[0].Outputs[?OutputKey=='HelloWorldFunction'].OutputValue" --output text)
@@ -65,7 +67,7 @@ jobs:
           # 新しいバージョンを発行
           VERSION=$(aws lambda publish-version --function-name $FUNCTION_NAME --description "Automated version created by GitHub Actions" --query "Version" --output text)
 
-          echo "Published Lambda version: $VERSION"
+          echo "Lambdaバージョンを発行しました: $VERSION"
           echo "function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -73,20 +75,25 @@ jobs:
           if aws lambda get-alias --function-name $FUNCTION_NAME --name Test &> /dev/null; then
             # エイリアスが存在する場合は更新
             aws lambda update-alias --function-name $FUNCTION_NAME --name Test --function-version $VERSION
-            echo "Updated Test alias to version $VERSION"
+            echo "Testエイリアスをバージョン $VERSION に更新しました"
           else
             # エイリアスが存在しない場合は作成
             aws lambda create-alias --function-name $FUNCTION_NAME --name Test --function-version $VERSION
-            echo "Created Test alias pointing to version $VERSION"
+            echo "Testエイリアスをバージョン $VERSION で作成しました"
           fi
 
   approve-prod-deployment:
     needs: build-deploy
     runs-on: ubuntu-latest
-    environment: production
+    environment: develop
     steps:
       - name: Get deployment information
-        run: echo "Testエイリアスが更新されました。本番環境（Prodエイリアス）へのデプロイを承認してください。"
+        run: |
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            echo "Testエイリアスが更新されました。開発環境へのデプロイを承認してください。"
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            echo "Testエイリアスが更新されました。プリコミット環境へのデプロイを承認してください。"
+          fi
 
   deploy-to-prod:
     needs: approve-prod-deployment
@@ -95,7 +102,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          role-to-assume: arn:aws:iam::571705099822:role/GitHubActionsSAMDeployRole
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-northeast-1
 
       - name: Update Prod Alias
@@ -124,9 +131,9 @@ jobs:
           if aws lambda get-alias --function-name $FUNCTION_NAME --name Prod &> /dev/null; then
             # エイリアスが存在する場合は更新
             aws lambda update-alias --function-name $FUNCTION_NAME --name Prod --function-version $VERSION
-            echo "Updated Prod alias to version $VERSION"
+            echo "Prodエイリアスをバージョン $VERSION に更新しました"
           else
             # エイリアスが存在しない場合は作成
             aws lambda create-alias --function-name $FUNCTION_NAME --name Prod --function-version $VERSION
-            echo "Created Prod alias pointing to version $VERSION"
+            echo "Prodエイリアスをバージョン $VERSION で作成しました"
           fi
