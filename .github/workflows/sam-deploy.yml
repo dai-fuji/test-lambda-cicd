@@ -12,35 +12,33 @@ permissions:
   contents: read
 
 jobs:
-  build-deploy:
+  approve-prod-deploy:
     runs-on: ubuntu-latest
-    environment: develop
+    environment: production
+    steps:
+      - name: Get deployment information
+        run: |
+          echo "Production環境のスイッチオーバー"
+
+  prod-deploy:
+    needs: approve-prod-deploy
+    runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v3
-
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: "20"
-
       - name: Setup AWS SAM CLI
         uses: aws-actions/setup-sam@v2
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-northeast-1
-
       - name: SAM Build
         run: sam build
-
       - name: SAM Deploy
         run: |
           sam deploy --stack-name lambda-cicd-stack \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
-
       - name: Publish Lambda Version and Update Test Alias
         # id: publish-version
         run: |
@@ -82,23 +80,18 @@ jobs:
             echo "Testエイリアスをバージョン $VERSION で作成しました"
           fi
 
-  approve-prod-deployment:
-    needs: build-deploy
+  approve-prod-switchover:
+    needs: prod-deploy
     runs-on: ubuntu-latest
-    environment: develop
+    environment: production
     steps:
       - name: Get deployment information
         run: |
-          if [ "${{ github.ref_name }}" = "develop" ]; then
-            echo "Testエイリアスが更新されました。開発環境へのデプロイを承認してください。"
-          elif [ "${{ github.ref_name }}" = "main" ]; then
-            echo "Testエイリアスが更新されました。プリコミット環境へのデプロイを承認してください。"
-          fi
+          echo "Production環境のスイッチオーバー"
 
-  deploy-to-prod:
-    needs: approve-prod-deployment
+  prod-switchover:
+    needs: approve-prod-switchover
     runs-on: ubuntu-latest
-    environment: develop
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
