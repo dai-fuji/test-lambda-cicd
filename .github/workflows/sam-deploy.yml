@@ -12,17 +12,9 @@ permissions:
   contents: read
 
 jobs:
-  approve-prod-deploy:
+  prod-deploy:
     runs-on: ubuntu-latest
     environment: production
-    steps:
-      - name: Get deployment information
-        run: |
-          echo "Production環境のスイッチオーバー"
-
-  prod-deploy:
-    needs: approve-prod-deploy
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Setup Node.js
@@ -88,17 +80,9 @@ jobs:
             echo "Testエイリアスをバージョン $VERSION で作成しました"
           fi
 
-  approve-prod-switchover:
-    needs: prod-deploy
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Get deployment information
-        run: |
-          echo "Production環境のスイッチオーバー"
-
   prod-switchover:
-    needs: approve-prod-switchover
+    needs: prod-deploy
+    environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS Credentials
@@ -110,8 +94,8 @@ jobs:
       - name: Update Prod Alias
         run: |
           # 前のジョブから関数名とバージョンを取得
-          FUNCTION_NAME="${{ needs.build-deploy.outputs.function_name }}"
-          VERSION="${{ needs.build-deploy.outputs.version }}"
+          FUNCTION_NAME="${{ needs.prod-deploy.outputs.function_name }}"
+          VERSION="${{ needs.prod-deploy.outputs.version }}"
 
           if [ -z "$FUNCTION_NAME" ] || [ -z "$VERSION" ]; then
             echo "関数名またはバージョンが取得できませんでした。CloudFormationスタックから再取得します。"
