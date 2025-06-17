@@ -16,7 +16,7 @@ exports.lambdaHandler = async (event, context) => {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "こんにちは、フジモトさん！",
+        message: "こんにちは、フジモトさん！！！",
         timestamp: new Date().toISOString(),
         googleRequest: {
           success: true,
