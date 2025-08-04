@@ -15,7 +15,8 @@ jobs:
   prod-deploy:
     runs-on: ubuntu-latest
     environment: production
-    steps:
+      - uses: actions/checkout@v3
+    
       - name: Deploy SAM Application
         uses: ./.github/actions/sam-deploy # ローカルアクションの場合
         with:
