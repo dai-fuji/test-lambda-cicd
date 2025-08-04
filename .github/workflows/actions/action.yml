@@ -1,0 +1,110 @@
+name: 'SAM Deploy with Lambda Versioning'
+description: 'Deploy SAM application and create/update Lambda version with alias'
+inputs:
+  aws-role-arn:
+    description: 'AWS IAM Role ARN for OIDC authentication'
+    required: true
+  aws-region:
+    description: 'AWS region for deployment'
+    required: false
+    default: 'ap-northeast-1'
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  stack-name:
+    description: 'CloudFormation stack name'
+    required: false
+    default: 'lambda-cicd-stack'
+  alias-name:
+    description: 'Lambda alias name to create/update'
+    required: false
+    default: 'Test'
+  function-output-key:
+    description: 'CloudFormation output key for Lambda function'
+    required: false
+    default: 'HelloWorldFunction'
+  fallback-function-name:
+    description: 'Fallback function name if output key fails'
+    required: false
+    default: 'lambda-cicd-stack-HelloWorldFunction'
+
+outputs:
+  function-name:
+    description: 'Lambda function name'
+    value: ${{ steps.publish-version.outputs.function_name }}
+  version:
+    description: 'Published Lambda version'
+    value: ${{ steps.publish-version.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ inputs.node-version }}
+    
+    - name: Setup AWS SAM CLI
+      uses: aws-actions/setup-sam@v2
+    
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+    
+    - name: SAM Build
+      run: sam build
+      shell: bash
+    
+    - name: SAM Deploy
+      run: |
+        sam deploy --stack-name ${{ inputs.stack-name }} \
+          --no-confirm-changeset \
+          --no-fail-on-empty-changeset
+      shell: bash
+    
+    - name: Publish Lambda Version and Update Alias
+      id: publish-version
+      run: |
+        # Lambdaの関数名を取得（SAMのスタック出力から取得する場合）
+        FUNCTION_NAME=$(aws cloudformation describe-stacks --stack-name ${{ inputs.stack-name }} --query "Stacks[0].Outputs[?OutputKey=='${{ inputs.function-output-key }}'].OutputValue" --output text)
+        
+        # 関数名が取得できたか確認
+        if [ -z "$FUNCTION_NAME" ] || [ "$FUNCTION_NAME" = "None" ]; then
+          echo "Lambda関数名が取得できませんでした。SAMテンプレートでOutputsセクションに${{ inputs.function-output-key }}という名前で関数ARNを出力してください。"
+          
+          # 代替手段：フォールバック関数名を使用
+          FUNCTION_NAME="${{ inputs.fallback-function-name }}"
+          echo "代替手段として関数名を使用します: $FUNCTION_NAME"
+        fi
+        
+        # 関数ARNから関数名を抽出（ARNが返された場合）
+        if [[ "$FUNCTION_NAME" == arn:aws:lambda:* ]]; then
+          FUNCTION_NAME=$(echo "$FUNCTION_NAME" | awk -F: '{print $7}')
+          echo "ARNから関数名を抽出しました: $FUNCTION_NAME"
+        fi
+        
+        echo "Lambda関数名: $FUNCTION_NAME"
+        
+        # 新しいバージョンを発行
+        VERSION=$(aws lambda publish-version --function-name $FUNCTION_NAME --description "Automated version created by GitHub Actions" --query "Version" --output text)
+        echo "Lambdaバージョンを発行しました: $VERSION"
+        
+        echo "function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+        # エイリアスが既に存在するか確認
+        if aws lambda get-alias --function-name $FUNCTION_NAME --name ${{ inputs.alias-name }} &> /dev/null; then
+          # エイリアスが存在する場合は更新
+          aws lambda update-alias --function-name $FUNCTION_NAME --name ${{ inputs.alias-name }} --function-version $VERSION
+          echo "${{ inputs.alias-name }}エイリアスをバージョン $VERSION に更新しました"
+        else
+          # エイリアスが存在しない場合は作成
+          aws lambda create-alias --function-name $FUNCTION_NAME --name ${{ inputs.alias-name }} --function-version $VERSION
+          echo "${{ inputs.alias-name }}エイリアスをバージョン $VERSION で作成しました"
+        fi
+      shell: bash
